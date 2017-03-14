@@ -9,7 +9,7 @@ lazy val root = (project in file(".")).enablePlugins(PlayScala)
 libraryDependencies ++= Seq(
   ws,
   jdbc,
-  "com.typesafe.play" %% "anorm" % "2.5.0"
-  //"com.typesafe.play" %% "play-slick" % "2.0.2",
-  //"com.h2database" % "h2" % "1.4.193"
+  "com.typesafe.play" %% "anorm" % "2.5.0",
+  "org.scalatestplus.play" %% "scalatestplus-play" % "1.5.0" % "test",
+  "org.mockito" % "mockito-core" % "2.7.17" % "test"
 )

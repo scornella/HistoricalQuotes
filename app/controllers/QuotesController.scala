@@ -71,7 +71,7 @@ class QuotesController @Inject()(
 
       case e: JsError =>
         logger.error(s"Error parsing request JSON, ${JsError.toJson(e)}")
-        Future.successful(BadRequest(errorAsJson(JsError.toJson(e).toString())))
+        Future.successful(BadRequest(errorAsJson(s"Error parsing JSON: ${JsError.toJson(e)}")))
     }
   }
 
