@@ -1,10 +1,10 @@
 package services
 
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
-import models.{ Dividend, Quote }
+import models.Dividend
+import play.api.Configuration
 import play.api.libs.json.{ JsError, JsSuccess, Json }
 import play.api.libs.ws.WSClient
 
@@ -16,34 +16,26 @@ trait DividendsService {
 
 }
 
-class YahooDividends @Inject()(ws: WSClient, implicit val ec: ExecutionContext) extends DividendsService {
+class YahooDividendsService @Inject()(
+  configuration: Configuration,
+  val ws: WSClient,
+  implicit val ec: ExecutionContext
+) extends DividendsService with YahooWebService {
 
-  val url = "https://query.yahooapis.com/v1/public/yql"
-  val collection = "yahoo.finance.dividendhistory"
+  override val url = configuration.getString("historicalQuotes.yahoo.url").get
+  override val collection = configuration.getString("historicalQuotes.yahoo.dividends.collection").get
+  override val store = configuration.getString("historicalQuotes.yahoo.env").get
 
   implicit val yahooDividendReads = Json.reads[YahooDividend]
 
   override def getDividends(ticker: String, startDate: LocalDate, endDate: LocalDate): Future[Seq[Dividend]] = {
-    val fst = startDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-    val fed = endDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+    val select =
+      s"""
+         |select * from $collection
+         |where symbol = '$ticker' and startDate = '${format(startDate)}' and endDate = '${format(endDate)}'
+       """.stripMargin
 
-    val select = s"select * from $collection " +
-      s"where symbol = '$ticker' " +
-      s"and startDate = '$fst' " +
-      s"and endDate = '$fed'"
-
-    val queryString = Seq(
-      "q" -> select,
-      "env" -> "store://datatables.org/alltableswithkeys",
-      "format" -> "json"
-    )
-
-    val request = ws.url(url)
-      .withHeaders("Accept" -> "application/json")
-      .withQueryString(queryString: _*)
-      .get()
-
-    val yahooDividends = request map { r =>
+    val yahooDividends = makeRequest(select) map { r =>
       val v = (r.json \ "query" \ "results" \ "quote").validate[Seq[YahooDividend]]
 
       val x = v match {
@@ -67,7 +59,7 @@ class YahooDividends @Inject()(ws: WSClient, implicit val ec: ExecutionContext) 
 
 }
 
-case class YahooDividend(
+private[services] case class YahooDividend(
   Symbol: String,
   Date: String,
   Dividends: String

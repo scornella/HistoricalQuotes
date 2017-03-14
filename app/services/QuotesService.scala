@@ -1,14 +1,12 @@
 package services
 
-import java.io.IOException
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 import models.Quote
-import play.api.data.format
+import play.api.Configuration
 import play.api.libs.json.{ JsError, JsSuccess, Json }
-import play.api.libs.ws.{ WSClient, WSRequest }
+import play.api.libs.ws.WSClient
 
 import scala.concurrent.{ ExecutionContext, Future }
 
@@ -20,57 +18,40 @@ trait QuotesService {
 
 }
 
-class YahooQuotes @Inject()(ws: WSClient, implicit val ec: ExecutionContext) extends QuotesService {
+class YahooQuotesService @Inject()(
+  configuration: Configuration,
+  val ws: WSClient,
+  implicit val ec: ExecutionContext
+) extends QuotesService with YahooWebService {
 
-  val url = "https://query.yahooapis.com/v1/public/yql"
-  val collection = "yahoo.finance.historicaldata"
+  override val url = configuration.getString("historicalQuotes.yahoo.url").get
+  override val collection = configuration.getString("historicalQuotes.yahoo.quotes.collection").get
+  override val store = configuration.getString("historicalQuotes.yahoo.env").get
 
   implicit val yahooQuoteReads = Json.reads[YahooQuote]
 
   override def tickerExists(ticker: String, startDate: LocalDate, endDate: LocalDate): Future[Boolean] = {
-    val fst = startDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-    val fed = endDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+    val statement =
+      s"""
+         |select * from $collection
+         |where symbol = '$ticker' and startDate = '${format(startDate)}' and endDate = '${format(endDate)}'
+         |limit 1
+       """.stripMargin
 
-    val statement = s"select * from $collection where symbol = '$ticker' and startDate = '$fst' and endDate = '$fed' limit 1"
-
-    val queryString = Seq(
-      "q" -> statement,
-      "env" -> "store://datatables.org/alltableswithkeys",
-      "format" -> "json"
-    )
-
-    val request = ws.url(url)
-      .withHeaders("Accept" -> "application/json")
-      .withQueryString(queryString: _*)
-      .get()
-
-    request map { r =>
+    makeRequest(statement) map { r =>
       val count = (r.json \ "query" \ "count").as[Int]
       count > 0
     }
   }
 
   override def getQuotes(ticker: String, startDate: LocalDate, endDate: LocalDate): Future[Seq[Quote]] = {
-    val fst = startDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-    val fed = endDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+    val select =
+      s"""
+         |select * from $collection
+         |where symbol = '$ticker' and startDate = '${format(startDate)}' and endDate = '${format(endDate)}'
+       """.stripMargin
 
-    val select = s"select * from $collection " +
-      s"where symbol = '$ticker' " +
-      s"and startDate = '$fst' " +
-      s"and endDate = '$fed'"
-
-    val queryString = Seq(
-      "q" -> select,
-      "env" -> "store://datatables.org/alltableswithkeys",
-      "format" -> "json"
-    )
-
-    val request = ws.url(url)
-      .withHeaders("Accept" -> "application/json")
-      .withQueryString(queryString: _*)
-      .get()
-
-    val yahooQuotes = request map { r =>
+    val yahooQuotes = makeRequest(select) map { r =>
       val v = (r.json \ "query" \ "results" \ "quote").validate[Seq[YahooQuote]]
 
       val x = v match {
@@ -94,7 +75,7 @@ class YahooQuotes @Inject()(ws: WSClient, implicit val ec: ExecutionContext) ext
 
 }
 
-case class YahooQuote(
+private[services] case class YahooQuote(
   Symbol: String,
   Date: String,
   Open: String,

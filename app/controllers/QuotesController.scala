@@ -5,9 +5,9 @@ import javax.inject.Inject
 
 import models.CombinedQuote
 import play.api.Logger
+import play.api.libs.functional.syntax._
 import play.api.libs.json._
 import play.api.mvc._
-import play.api.libs.functional.syntax._
 import services.{ QuotesCache, QuotesCacheManager }
 
 import scala.concurrent.{ ExecutionContext, Future }
@@ -26,8 +26,8 @@ class QuotesController @Inject()(qs: QuotesCacheManager, qc: QuotesCache, implic
   val NO_SUCH_TICKER = "Sorry, but it seems that the ticker symbol specified does not exist."
 
   def getQuote = Action.async(BodyParsers.parse.json) { implicit request =>
-    import ResponseImplicits._
     import RequestImplicits._
+    import ResponseImplicits._
 
     val quoteRequest = request.body.validate[QuoteRequest]
 

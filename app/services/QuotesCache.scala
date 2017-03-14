@@ -2,11 +2,11 @@ package services
 
 import javax.inject.{ Inject, Singleton }
 
-import play.api.db.Database
-import anorm._
 import anorm.SqlParser._
+import anorm._
 import models.{ CombinedQuote, Dividend, Quote }
 import play.api.Logger
+import play.api.db.Database
 
 import scala.concurrent.{ ExecutionContext, Future }
 
