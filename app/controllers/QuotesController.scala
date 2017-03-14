@@ -4,85 +4,109 @@ import java.time.LocalDate
 import javax.inject.Inject
 
 import models.CombinedQuote
-import play.api.Logger
 import play.api.libs.functional.syntax._
 import play.api.libs.json._
 import play.api.mvc._
+import play.api.{ Configuration, Logger }
 import services.{ QuotesCache, QuotesCacheManager }
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.matching.Regex
 
-class QuotesController @Inject()(qs: QuotesCacheManager, qc: QuotesCache, implicit val ec: ExecutionContext) extends Controller {
-  val logger: Logger = Logger(this.getClass)
+class QuotesController @Inject()(
+  configuration: Configuration,
+  cacheManager: QuotesCacheManager,
+  cache: QuotesCache,
+  implicit val ec: ExecutionContext
+) extends Controller {
 
-  val startDate = LocalDate.parse("2011-01-01")
-  val endDate = LocalDate.parse("2011-12-31")
+  private val logger: Logger = Logger(this.getClass)
 
-  val DEFAULT_SORT_FIELD = "date"
-  val DEFAULT_SORT_DIRECTION = "asc"
+  private val START_DATE = LocalDate.parse(configuration.getString("historicalQuotes.getQuotes.startDate").get)
+  private val END_DATE = LocalDate.parse(configuration.getString("historicalQuotes.getQuotes.endDate").get)
 
-  val COME_BACK_LATER = "Sorry, that information is not currently available, please try again later."
-  val NO_SUCH_TICKER = "Sorry, but it seems that the ticker symbol specified does not exist."
+  private val DEFAULT_SORT_FIELD = "date"
+  private val DEFAULT_SORT_DIRECTION = "asc"
+
+  private val COME_BACK_LATER = configuration.getString("historicalQuotes.getQuotes.noCacheMessage").get
+  private val NO_SUCH_TICKER = configuration.getString("historicalQuotes.getQuotes.noSuchSymbolMessage").get
+  private val UNEXPECTED = configuration.getString("historicalQuotes.getQuotes.unexpectedError").get
+
+  import RequestImplicits._
+  import ResponseImplicits._
 
   def getQuote = Action.async(BodyParsers.parse.json) { implicit request =>
-    import RequestImplicits._
-    import ResponseImplicits._
+    //try and parse request body
+    val jsResult = request.body.validate[QuoteRequest]
 
-    val quoteRequest = request.body.validate[QuoteRequest]
-
-    quoteRequest match {
+    jsResult match {
       case s: JsSuccess[QuoteRequest] =>
+        val quoteRequest = s.get
 
-        val qr = s.get
-
-        val hasQuoteF = qc.containsQuote(qr.ticker)
-
-        hasQuoteF flatMap { hasQuote =>
+        //check the cache to see if quotes already present
+        cache.containsQuote(quoteRequest.ticker) flatMap { hasQuote =>
           if (hasQuote) {
-            logger.debug(s"Quotes for ${qr.ticker} are already cached")
-            val (sortField, sortDirection) = sortFromRequest(qr)
-
-            qc.retrieveQuote(qr.ticker, qr.limit, qr.skip, Some(sortField), Some(sortDirection)) map { quotes =>
-              val response = QuoteResponse(quotes = quotes, error = None)
-              Ok(Json.toJson(response))
-            }
+            //fetch the quotes and return
+            fetchQuotes(quoteRequest) map (response => Ok(Json.toJson(response)))
           }
           else {
-            logger.debug(s"Quotes for ${qr.ticker} are not cached")
-            val tickerExistsF = qs.cacheTicker(qr.ticker, startDate, endDate)
-
-            tickerExistsF map { tickerExists =>
-              if (tickerExists) {
-                val response = QuoteResponse(quotes = Seq.empty[CombinedQuote], error = Some(COME_BACK_LATER))
-                Ok(Json.toJson(response))
+            //ask the cache manager to cache
+            cacheQuotes(quoteRequest) map { symbolExists =>
+              if (symbolExists) {
+                //tell the user to come back later
+                Ok(errorAsJson(COME_BACK_LATER))
               }
               else {
-                logger.debug(s"${qr.ticker} does not exist")
-                val response = QuoteResponse(quotes = Seq.empty[CombinedQuote], error = Some(NO_SUCH_TICKER))
-                Ok(Json.toJson(response))
+                logger.debug(s"${quoteRequest.ticker} does not exist")
+                //that ticker symbol isnt valid
+                Ok(errorAsJson(NO_SUCH_TICKER))
               }
             }
           }
         } recover {
           case e: Throwable =>
-            logger.error(s"Error Responding to web request", e)
-            val response = QuoteResponse(quotes = Seq.empty[CombinedQuote], error = Some(e.getMessage))
-            InternalServerError(Json.toJson(response))
+            logger.error(s"Error responding to web request", e)
+            InternalServerError(errorAsJson(UNEXPECTED))
         }
 
       case e: JsError =>
         logger.error(s"Error parsing request JSON, ${JsError.toJson(e)}")
-        val response = QuoteResponse(quotes = Seq.empty[CombinedQuote], error = Some("parse error"))
-        Future.successful(BadRequest(Json.toJson(response)))
+        Future.successful(BadRequest(errorAsJson(JsError.toJson(e).toString())))
     }
   }
 
-  private def sortFromRequest(quoteRequest: QuoteRequest): (String, String) = {
-    quoteRequest.order flatMap { order =>
-      val tokens = order.split(".")
+  private def cacheQuotes(quoteRequest: QuoteRequest): Future[Boolean] = {
+    logger.debug(s"Quotes for ${quoteRequest.ticker} are not cached")
 
-      tokens match {
+    cacheManager.cacheTicker(quoteRequest.ticker, START_DATE, END_DATE)
+  }
+
+  private def fetchQuotes(quoteRequest: QuoteRequest): Future[QuoteResponse] = {
+    logger.debug(s"Quotes for ${quoteRequest.ticker} are already cached")
+
+    val (sortField, sortDirection) = sortFromRequest(quoteRequest)
+
+    cache.retrieveQuote(
+      quoteRequest.ticker,
+      quoteRequest.limit,
+      quoteRequest.skip,
+      Some(sortField),
+      Some(sortDirection)
+    ) map { quotes =>
+
+      QuoteResponse(quotes = quotes, error = None)
+    }
+  }
+
+  private def errorAsJson(error: String): JsValue = {
+    val response = QuoteResponse(quotes = Seq.empty[CombinedQuote], error = Some(error))
+    Json.toJson(response)
+  }
+
+  private def sortFromRequest(quoteRequest: QuoteRequest): (String, String) = {
+    //try and parse a sort field and order or fall back to default
+    quoteRequest.order flatMap { order =>
+      order.split("\\.") match {
         case Array(field, direction) =>
           Some((field, direction))
         case _ =>
@@ -95,7 +119,7 @@ class QuotesController @Inject()(qs: QuotesCacheManager, qc: QuotesCache, implic
 }
 
 object RequestImplicits {
-  val SORT_PATTERN = new Regex("^[date|open|close|is_dividend_day][.asc|.desc]$")
+  val SORT_PATTERN = new Regex("^(date|open|close|is_dividend_day){1}\\.(asc|desc){1}$")
 
   implicit val quoteRequestReads: Reads[QuoteRequest] = (
     (JsPath \ "ticker").read[String] and

@@ -29,7 +29,15 @@ trait QuotesCache {
 
 @Singleton
 class H2QuotesCache @Inject()(db: Database, implicit val ec: ExecutionContext) extends QuotesCache {
-  val logger: Logger = Logger(this.getClass)
+  private val logger: Logger = Logger(this.getClass)
+
+  private val quoteParser = get[String]("date") ~
+    get[String]("open") ~
+    get[String]("close") ~
+    get[Boolean]("is_dividend_day") map {
+    case date ~ open ~ close ~ dividend =>
+      CombinedQuote(date, open, close, dividend)
+  }
 
   override def insertQuotes(ticker: String, quotes: Seq[Quote]): Future[Unit] = {
     Future {
@@ -76,8 +84,6 @@ class H2QuotesCache @Inject()(db: Database, implicit val ec: ExecutionContext) e
         """.stripMargin
         ).as(scalar[Int].single)
 
-        logger.debug(s"Exists $exists")
-
         exists > 1
       }
     }
@@ -93,21 +99,29 @@ class H2QuotesCache @Inject()(db: Database, implicit val ec: ExecutionContext) e
     Future {
       db.withConnection { implicit c =>
 
-        val parser = get[String]("date") ~ get[String]("open") ~ get[String]("close") ~ get[Option[String]]("dividend") map {
-          case date ~ open ~ close ~ dividend =>
-            CombinedQuote(date, open, close, dividend.isDefined)
-        }
+        val sort = for {
+          field <- sortField
+          direction <- sortDirection
+        } yield s"order by $field $direction"
+
+        val optional = Seq(
+          sort,
+          limit.map(l => s"limit $l"),
+          skip.map(s => s"offset $s")
+        ).flatten.mkString(" ")
 
         SQL(
           s"""
-             |select quotes.date, quotes.open, quotes.close, dividends.dividend
+             |select quotes.date, quotes.open, quotes.close,
+             |case when dividends.dividend is null then false else true end as is_dividend_day
              |from quotes
              |left join dividends
              |on quotes.ticker = dividends.ticker
              |and quotes.date = dividends.date
              |where quotes.ticker = '$ticker'
+             |$optional
         """.stripMargin
-        ).as(parser.*)
+        ).as(quoteParser.*)
       }
     }
   }
