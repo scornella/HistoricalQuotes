@@ -24,9 +24,12 @@ class YahooQuotesService @Inject()(
   implicit val ec: ExecutionContext
 ) extends QuotesService with YahooWebService {
 
-  override val url = configuration.getString("historicalQuotes.yahoo.url").get
-  override val collection = configuration.getString("historicalQuotes.yahoo.quotes.collection").get
-  override val store = configuration.getString("historicalQuotes.yahoo.env").get
+  //I prefer the option-less interface of typesafe config
+  private val config = configuration.underlying
+
+  override val url = config.getString("historicalQuotes.yahoo.url")
+  override val collection = config.getString("historicalQuotes.yahoo.quotes.collection")
+  override val store = config.getString("historicalQuotes.yahoo.env")
 
   implicit val yahooQuoteReads = Json.reads[YahooQuote]
 

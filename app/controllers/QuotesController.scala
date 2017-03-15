@@ -20,17 +20,20 @@ class QuotesController @Inject()(
   implicit val ec: ExecutionContext
 ) extends Controller {
 
+  //I prefer the option-less interface of typesafe config
+  private val config = configuration.underlying
+
   private val logger: Logger = Logger(this.getClass)
 
-  private val START_DATE = LocalDate.parse(configuration.getString("historicalQuotes.getQuotes.startDate").get)
-  private val END_DATE = LocalDate.parse(configuration.getString("historicalQuotes.getQuotes.endDate").get)
+  private val START_DATE = LocalDate.parse(config.getString("historicalQuotes.getQuotes.startDate"))
+  private val END_DATE = LocalDate.parse(config.getString("historicalQuotes.getQuotes.endDate"))
 
   private val DEFAULT_SORT_FIELD = "date"
   private val DEFAULT_SORT_DIRECTION = "asc"
 
-  private val COME_BACK_LATER = configuration.getString("historicalQuotes.getQuotes.noCacheMessage").get
-  private val NO_SUCH_TICKER = configuration.getString("historicalQuotes.getQuotes.noSuchSymbolMessage").get
-  private val UNEXPECTED = configuration.getString("historicalQuotes.getQuotes.unexpectedError").get
+  private val COME_BACK_LATER = config.getString("historicalQuotes.getQuotes.noCacheMessage")
+  private val NO_SUCH_TICKER = config.getString("historicalQuotes.getQuotes.noSuchSymbolMessage")
+  private val UNEXPECTED = config.getString("historicalQuotes.getQuotes.unexpectedError")
 
   import RequestImplicits._
   import ResponseImplicits._
