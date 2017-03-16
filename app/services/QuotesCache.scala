@@ -32,11 +32,11 @@ class H2QuotesCache @Inject()(db: Database, implicit val ec: ExecutionContext) e
   private val logger: Logger = Logger(this.getClass)
 
   private val quoteParser = get[String]("date") ~
-    get[String]("open") ~
-    get[String]("close") ~
+    get[BigDecimal]("open") ~
+    get[BigDecimal]("close") ~
     get[Boolean]("is_dividend_day") map {
     case date ~ open ~ close ~ dividend =>
-      CombinedQuote(date, open, close, dividend)
+      CombinedQuote(date, open.toString(), close.toString(), dividend)
   }
 
   override def insertQuotes(ticker: String, quotes: Seq[Quote]): Future[Unit] = {
@@ -50,7 +50,7 @@ class H2QuotesCache @Inject()(db: Database, implicit val ec: ExecutionContext) e
       SQL(
         s"""
            |insert into quotes(ticker, date, open, close)
-           |values('$ticker', '${quote.date}', '${quote.open}', '${quote.close}')
+           |values('$ticker', '${quote.date}', '${BigDecimal(quote.open)}', '${BigDecimal(quote.close)}')
         """.stripMargin
       ).execute()
     }
@@ -67,7 +67,7 @@ class H2QuotesCache @Inject()(db: Database, implicit val ec: ExecutionContext) e
       SQL(
         s"""
            |insert into dividends(ticker, date, dividend)
-           |values('$ticker', '${dividend.date}', '${dividend.dividend}')
+           |values('$ticker', '${dividend.date}', '${BigDecimal(dividend.dividend)}')
         """.stripMargin
       ).execute()
     }
@@ -135,8 +135,8 @@ class H2QuotesCache @Inject()(db: Database, implicit val ec: ExecutionContext) e
           |id int primary key auto_increment,
           |ticker varchar(20),
           |date varchar(10),
-          |open varchar(10),
-          |close varchar(10)
+          |open decimal,
+          |close decimal
           )
         """.stripMargin
       ).execute()
@@ -152,7 +152,7 @@ class H2QuotesCache @Inject()(db: Database, implicit val ec: ExecutionContext) e
           |id int primary key auto_increment,
           |ticker varchar(20),
           |date varchar(10),
-          |dividend varchar(10)
+          |dividend decimal
           )
         """.stripMargin
       ).execute()
